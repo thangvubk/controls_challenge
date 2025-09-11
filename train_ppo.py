@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.optim as optim
+from tensorboardX import SummaryWriter
 
 # ---- import your simulator module dynamically ----
 def load_sim(sim_path: str):
@@ -24,7 +25,7 @@ def compute_step_reward(sim, del_t: float, lat_mult: float):
     jerk_cost = (jerk**2) * 100.0
   else:
     jerk_cost = 0.0
-  return -(lat_cost + jerk_cost)
+  return -(lat_cost)
 
 def collect_episode(sim_mod, data_path: Path, model_path: str, ppo_ctrl, device):
   # sim setup
@@ -52,13 +53,14 @@ def collect_episode(sim_mod, data_path: Path, model_path: str, ppo_ctrl, device)
   # gather trajectories from controller
   obs, act, logp = ppo_ctrl.pop_trajectory()
   # truncate buffers to rewards length (defensive)
-  T = min(len(rewards), len(obs))
-  obs, act, logp, rewards = obs[:T], act[:T], logp[:T], np.asarray(rewards[:T], dtype=np.float32)
+  S = CONTROL_START_IDX
+  E = min(len(rewards), len(obs))
+  obs, act, logp, rewards = obs[S:E], act[S:E], logp[S:E], np.asarray(rewards[S:E], dtype=np.float32)
 
   # bootstrap value = 0 (terminal by design)
   values = ppo_ctrl.value_batch(obs).squeeze(-1)
-  values = values[:T]
-  dones = np.zeros(T, dtype=np.float32)
+  values = values
+  dones = np.zeros(obs.shape[0], dtype=np.float32)
   dones[-1] = 1.0  # episode end
 
   return obs, act, logp.reshape(-1,1), rewards.reshape(-1,1), values.reshape(-1,1), dones.reshape(-1,1)
@@ -103,10 +105,12 @@ def main():
   parser.add_argument("--batch_size", type=int, default=2048)
   parser.add_argument("--minibatch", type=int, default=256)
   parser.add_argument("--update_epochs", type=int, default=10)
+  parser.add_argument("--exp", type=str, default='work_dirs')
   args = parser.parse_args()
 
   device = torch.device(args.device)
   sim_mod = load_sim(args.sim_module)
+  writer = SummaryWriter(args.exp)
 
   # controller in training mode
   from controllers.ppo import Controller  # imports the file above
@@ -163,14 +167,19 @@ def main():
 
         v_t = v_new
         ret_t = torch.from_numpy(ret_mb).to(device)
-        vf_loss = ((v_t - ret_t)**2).mean()
+        vf_loss = ((v_t - ret_t).abs()).mean()
 
         ent = entropy.mean()
-        loss = pi_loss + 0.5*vf_loss - args.entropy_coef*ent
+        pi_loss = 10 * pi_loss
+        vf_loss = 0.001*vf_loss
+        ent = args.entropy_coef*ent
+        loss = pi_loss + vf_loss - ent
+        writer.add_scalar("Loss/pi", (10 * pi_loss).item(), epoch)
+        # print(pi_loss, 0.5*vf_loss)
 
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(ctrl.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(ctrl.parameters(), 0.5)
         optimizer.step()
 
     # save
@@ -180,6 +189,11 @@ def main():
       avg_ret = float(ret.mean())
       avg_adv = float(np.abs(adv).mean())
       print(f"[Epoch {epoch:03d}] steps={N}  return(mean)={avg_ret:.3f}  |adv|={avg_adv:.3f}  saved -> {args.save_path}")
+      writer.add_scalar("Loss/pi", pi_loss.item(), epoch)
+      writer.add_scalar("Loss/value", vf_loss.item(), epoch)
+      writer.add_scalar("Return",avg_ret, epoch)
+      writer.flush()
+      
 
 if __name__ == "__main__":
   main()

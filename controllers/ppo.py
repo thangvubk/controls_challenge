@@ -63,17 +63,15 @@ def _tanh_squash(mu: torch.Tensor, log_std: torch.Tensor, x: torch.Tensor = None
 
 # ---------- model ----------
 class ActorCritic(nn.Module):
-  def __init__(self, obs_dim: int, hidden: Tuple[int,int]=(128,128)):
+  def __init__(self, obs_dim: int, hidden: Tuple[int,int]=(32,32)):
     super().__init__()
     self.pi = nn.Sequential(
       nn.Linear(obs_dim, hidden[0]), nn.ReLU(),
-      nn.Linear(hidden[0], hidden[1]), nn.ReLU(),
       nn.Linear(hidden[1], 1)  # mean (pre-squash)
     )
     self.log_std = nn.Parameter(torch.zeros(1))  # shared log_std (simple & stable)
     self.v  = nn.Sequential(
       nn.Linear(obs_dim, hidden[0]), nn.ReLU(),
-      nn.Linear(hidden[0], hidden[1]), nn.ReLU(),
       nn.Linear(hidden[1], 1)
     )
 

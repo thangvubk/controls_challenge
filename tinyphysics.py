@@ -43,6 +43,18 @@ FuturePlan = namedtuple('FuturePlan', ['lataccel', 'roll_lataccel', 'v_ego', 'a_
 DATASET_URL = "https://huggingface.co/datasets/commaai/commaSteeringControl/resolve/main/data/SYNTHETIC_V0.zip"
 DATASET_PATH = Path(__file__).resolve().parent / "data"
 
+def get_available_controllers():
+  return [f.stem for f in Path('controllers').iterdir() if f.is_file() and f.suffix == '.py' and f.stem != '__init__']
+
+available_controllers = get_available_controllers()
+parser = argparse.ArgumentParser()
+parser.add_argument("--model_path", type=str, required=True)
+parser.add_argument("--data_path", type=str, required=True)
+parser.add_argument("--num_segs", type=int, default=100)
+parser.add_argument("--debug", action='store_true')
+parser.add_argument("--controller", default='pid', choices=available_controllers)
+args = parser.parse_args()
+
 class LataccelTokenizer:
   def __init__(self):
     self.vocab_size = VOCAB_SIZE
@@ -206,12 +218,9 @@ class TinyPhysicsSimulator:
 
     if self.debug:
       plt.ioff()
-      plt.show()
+      plt.savefig(f'runs/{args.controller}.png')
     return self.compute_cost()
 
-
-def get_available_controllers():
-  return [f.stem for f in Path('controllers').iterdir() if f.is_file() and f.suffix == '.py' and f.stem != '__init__']
 
 
 def run_rollout(data_path, controller_type, model_path, debug=False):
@@ -233,14 +242,6 @@ def download_dataset():
 
 
 if __name__ == "__main__":
-  available_controllers = get_available_controllers()
-  parser = argparse.ArgumentParser()
-  parser.add_argument("--model_path", type=str, required=True)
-  parser.add_argument("--data_path", type=str, required=True)
-  parser.add_argument("--num_segs", type=int, default=100)
-  parser.add_argument("--debug", action='store_true')
-  parser.add_argument("--controller", default='pid', choices=available_controllers)
-  args = parser.parse_args()
 
   if not DATASET_PATH.exists():
     download_dataset()
